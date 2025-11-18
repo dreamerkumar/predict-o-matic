@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "telecom-predictor": {
+      "command": "/Users/vishalkumar/code/frontier/predict-o-matic/telecom-sales-predictor-mcp-server/venv/bin/python",
+      "args": [
+        "/Users/vishalkumar/code/frontier/predict-o-matic/telecom-sales-predictor-mcp-server/mcp_server.py"
+      ],
+      "env": {}
+    }
+  }
+}
+

@@ -1,0 +1,12 @@
+# MCP Server Dependencies
+mcp>=1.1.2
+python-dotenv>=1.0.0
+
+# Additional dependencies for running the analysis script
+# (These should already be installed in the telecom-sales-predictor venv,
+# but listing them here for completeness if running in a separate environment)
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+matplotlib>=3.7.0
+
