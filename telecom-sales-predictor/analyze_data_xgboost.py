@@ -1,10 +1,10 @@
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import xgboost as xgb
 
 def get_holiday_features(date):
     """
@@ -76,7 +76,7 @@ def get_holiday_features(date):
 
 def main():
     """
-    Analyze telecom data from CSV file and build linear regression models
+    Analyze telecom data from CSV file and build XGBoost regression models
     """
     print("Loading data from CSV file...")
     print("="*60)
@@ -103,7 +103,7 @@ def main():
 
     # Prepare data for modeling
     print("\n" + "="*60)
-    print("PREPARING DATA FOR LINEAR REGRESSION")
+    print("PREPARING DATA FOR XGBOOST REGRESSION")
     print("="*60)
 
     # Convert Date to datetime and extract features
@@ -163,16 +163,25 @@ def main():
 
     for target in target_columns:
         print("\n" + "="*60)
-        print(f"BUILDING MODEL FOR: {target}")
+        print(f"BUILDING XGBOOST MODEL FOR: {target}")
         print("="*60)
 
         y = df[target]
         y_train = y[train_mask]
         y_test = y[test_mask]
 
-        # Create and train the model
-        model = LinearRegression()
-        model.fit(X_train, y_train)
+        # Create and train the XGBoost model
+        model = xgb.XGBRegressor(
+            n_estimators=200,          # Number of boosting rounds
+            learning_rate=0.05,        # Step size shrinkage
+            max_depth=6,               # Maximum tree depth
+            min_child_weight=3,        # Minimum sum of instance weight needed in a child
+            subsample=0.8,             # Subsample ratio of training instances
+            colsample_bytree=0.8,      # Subsample ratio of columns when constructing each tree
+            random_state=42,           # For reproducibility
+            n_jobs=-1                  # Use all CPU cores
+        )
+        model.fit(X_train, y_train, verbose=False)
 
         # Make predictions
         y_pred_train = model.predict(X_train)
@@ -208,11 +217,16 @@ def main():
         print(f"    RMSE: {test_rmse:.4f}")
         print(f"    MAE: {test_mae:.4f}")
 
-        # Display feature coefficients
-        print(f"\n  Feature Coefficients:")
-        for feature, coef in zip(feature_columns, model.coef_):
-            print(f"    {feature}: {coef:.4f}")
-        print(f"    Intercept: {model.intercept_:.4f}")
+        # Display feature importance
+        print(f"\n  Feature Importance (sorted by importance):")
+        feature_importance = model.feature_importances_
+        importance_df = pd.DataFrame({
+            'feature': feature_columns,
+            'importance': feature_importance
+        }).sort_values('importance', ascending=False)
+
+        for idx, row in importance_df.iterrows():
+            print(f"    {row['feature']}: {row['importance']:.4f}")
 
     print("\n" + "="*60)
     print("MODEL TRAINING COMPLETE")
@@ -229,7 +243,7 @@ def main():
 
     # Create a figure with 2 subplots (one for each target)
     fig, axes = plt.subplots(2, 1, figsize=(14, 10))
-    fig.suptitle('Actual vs Predicted Values on Test Set (Aug-Oct 2025)',
+    fig.suptitle('XGBoost: Actual vs Predicted Values on Test Set (Aug-Oct 2025)',
                  fontsize=16, fontweight='bold')
 
     for idx, target in enumerate(target_columns):
@@ -281,7 +295,7 @@ def main():
         # Formatting
         ax.set_xlabel('Date', fontsize=11, fontweight='bold')
         ax.set_ylabel(target, fontsize=11, fontweight='bold')
-        ax.set_title(f'{target} - Test Set Performance (R² = {results[target]["test_r2"]:.4f})',
+        ax.set_title(f'{target} - XGBoost Test Set Performance (R² = {results[target]["test_r2"]:.4f})',
                     fontsize=13, fontweight='bold', pad=10)
         ax.legend(loc='best', fontsize=10)
         ax.grid(True, alpha=0.3, linestyle='--')
@@ -294,7 +308,7 @@ def main():
     plt.tight_layout()
 
     # Save the figure
-    output_file = 'model_predictions_test_set.png'
+    output_file = 'model_predictions_xgboost_test_set.png'
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"\nVisualization saved to: {output_file}")
 
@@ -309,5 +323,5 @@ def main():
 
 if __name__ == "__main__":
     df, models, results, test_df = main()
-    print("\nModels are ready for predictions!")
+    print("\nXGBoost models are ready for predictions!")
     print("="*60)

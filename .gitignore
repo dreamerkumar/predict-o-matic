@@ -48,3 +48,7 @@ Thumbs.db
 # *.xlsx
 # *.db
 # *.sqlite
+
+# Ignore instructions file
+telecom-sales-predictor/instructions.md
+instructions.md
