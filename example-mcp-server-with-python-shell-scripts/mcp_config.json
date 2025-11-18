@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "calculator": {
+      "command": "/absolute/path/to/project/venv/bin/python",
+      "args": [
+        "/absolute/path/to/project/mcp_server.py"
+      ],
+      "cwd": "/absolute/path/to/project",
+      "env": {}
+    }
+  }
+}
+
