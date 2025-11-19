@@ -49,8 +49,5 @@ Thumbs.db
 # *.db
 # *.sqlite
 
-# Ignore instructions file
-telecom-sales-predictor/instructions.md
-instructions.md
 
 output_files/

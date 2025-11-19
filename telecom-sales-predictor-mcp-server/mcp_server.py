@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-MCP Server that exposes telecom sales prediction analysis as a tool.
-Runs the analyze_data.py script and returns the generated PNG visualization.
+MCP Server that exposes telecom sales prediction analysis as two tools:
+1. analyze_hybrid_model: Trains and evaluates hybrid ML model (Random Forest + Linear Regression)
+2. predict_december_2025: Generates December 2025 sales forecasts
 """
 
 import sys
@@ -18,6 +19,8 @@ import subprocess
 import base64
 from pathlib import Path
 from typing import Any
+import glob
+import os
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -25,12 +28,16 @@ from mcp.types import Tool, TextContent, ImageContent
 
 # Get the directory where this script is located
 SCRIPT_DIR = Path(__file__).parent
-# Path to the analyze_data.py script (one level up, then into telecom-sales-predictor)
-ANALYZE_SCRIPT = SCRIPT_DIR.parent / "telecom-sales-predictor" / "analyze_data.py"
-# Path where the PNG will be generated
-PNG_OUTPUT = SCRIPT_DIR.parent / "telecom-sales-predictor" / "model_predictions_test_set.png"
+# Path to the main project directory
+PROJECT_DIR = SCRIPT_DIR.parent / "telecom-sales-predictor"
+# Paths to the analysis scripts
+HYBRID_ANALYZE_SCRIPT = PROJECT_DIR / "analyze_data_hybrid.py"
+DECEMBER_PREDICT_SCRIPT = PROJECT_DIR / "predict_december_2025.py"
 # CSV data file location
-CSV_FILE = SCRIPT_DIR.parent / "telecom-sales-predictor" / "final_dataset.csv"
+CSV_FILE = PROJECT_DIR / "final_dataset.csv"
+TEST_DATASET = PROJECT_DIR / "test_dataset_dec_2025.csv"
+# Output directory where PNG files are generated
+OUTPUT_DIR = PROJECT_DIR / "output_files"
 
 # Create an MCP server
 app = Server("telecom-predictor-server")
@@ -44,15 +51,17 @@ async def list_tools() -> list[Tool]:
     """
     return [
         Tool(
-            name="generate_sales_predictions",
+            name="analyze_hybrid_model",
             description=(
-                "Analyzes telecom sales data using linear regression and generates predictions. "
-                "Returns a PNG visualization showing actual vs predicted values for VAS sales "
-                "and speed upgrades on the test set (Aug-Oct 2025). The analysis includes:\n"
-                "- Linear regression models for VAS_Sold and Speed_Upgrades\n"
-                "- R² scores, RMSE, and MAE metrics for model evaluation\n"
-                "- Visual comparison of actual vs predicted values with 95% confidence intervals\n"
-                "- Feature importance analysis showing impact of emails, push notifications, and temporal factors"
+                "Analyzes telecom sales data using a hybrid machine learning model and generates predictions. "
+                "Uses Random Forest for VAS_Sold (86.4% accuracy) and Linear Regression for Speed_Upgrades (80.2% accuracy). "
+                "Returns a PNG visualization showing actual vs predicted values on the test set (Aug-Oct 2025). "
+                "The analysis includes:\n"
+                "- Hybrid model training (Random Forest + Linear Regression)\n"
+                "- R² scores, RMSE, and MAE metrics for both models\n"
+                "- Visual comparison with 95% confidence intervals\n"
+                "- Feature importance analysis\n"
+                "- Training data: Sep 2024 - Jul 2025, Test data: Aug-Oct 2025"
             ),
             inputSchema={
                 "type": "object",
@@ -65,8 +74,55 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": []
             }
+        ),
+        Tool(
+            name="predict_december_2025",
+            description=(
+                "Generates sales predictions for December 2025 using the trained hybrid model. "
+                "Trains models on historical data (Sep 2024 - Oct 2025) and applies them to December 2025 "
+                "with planned marketing campaigns. Returns:\n"
+                "- Detailed CSV with daily predictions by channel\n"
+                "- Cumulative visualization chart showing day-over-day growth\n"
+                "- Campaign day markers (Push notifications for App, Emails for Web)\n"
+                "- Summary statistics (total predicted sales, daily averages, top 5 days)\n"
+                "- Predictions for VAS_Sold and Speed_Upgrades based on marketing activities"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "include_stats": {
+                        "type": "boolean",
+                        "description": "Whether to include detailed prediction statistics in the response",
+                        "default": True
+                    },
+                    "return_csv": {
+                        "type": "boolean",
+                        "description": "Whether to return the detailed predictions CSV content",
+                        "default": False
+                    }
+                },
+                "required": []
+            }
         )
     ]
+
+
+def find_latest_output_file(pattern: str) -> Path | None:
+    """
+    Find the most recently generated output file matching the pattern.
+    
+    Args:
+        pattern: Glob pattern to match files (e.g., "model_predictions_hybrid_final_*.png")
+        
+    Returns:
+        Path to the most recent file, or None if no files found
+    """
+    files = glob.glob(str(OUTPUT_DIR / pattern))
+    if not files:
+        return None
+    # Sort by modification time, most recent first
+    files.sort(key=os.path.getmtime, reverse=True)
+    return Path(files[0])
 
 
 @app.call_tool()
@@ -81,16 +137,25 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
     Returns:
         List containing TextContent with stats and ImageContent with the PNG chart
     """
-    if name != "generate_sales_predictions":
+    if name == "analyze_hybrid_model":
+        return await run_hybrid_analysis(arguments)
+    elif name == "predict_december_2025":
+        return await run_december_prediction(arguments)
+    else:
         raise ValueError(f"Unknown tool: {name}")
-    
+
+
+async def run_hybrid_analysis(arguments: Any) -> list[TextContent | ImageContent]:
+    """
+    Run the hybrid model analysis (analyze_data_hybrid.py).
+    """
     # Validate that required files exist
-    if not ANALYZE_SCRIPT.exists():
+    if not HYBRID_ANALYZE_SCRIPT.exists():
         return [
             TextContent(
                 type="text",
-                text=f"Error: Analysis script not found at {ANALYZE_SCRIPT}\n"
-                     f"Please ensure telecom-sales-predictor/analyze_data.py exists."
+                text=f"Error: Analysis script not found at {HYBRID_ANALYZE_SCRIPT}\n"
+                     f"Please ensure telecom-sales-predictor/analyze_data_hybrid.py exists."
             )
         ]
     
@@ -107,15 +172,13 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
     
     try:
         # Run the analysis script
-        # Use the telecom-sales-predictor directory as the working directory
-        # so that the script can find final_dataset.csv
         result = subprocess.run(
-            [sys.executable, str(ANALYZE_SCRIPT)],
+            [sys.executable, str(HYBRID_ANALYZE_SCRIPT)],
             capture_output=True,
             text=True,
-            timeout=60,  # Longer timeout for data processing
+            timeout=90,  # Longer timeout for hybrid model training
             check=False,
-            cwd=str(ANALYZE_SCRIPT.parent)  # Run in telecom-sales-predictor directory
+            cwd=str(HYBRID_ANALYZE_SCRIPT.parent)  # Run in telecom-sales-predictor directory
         )
         
         # Check if the process succeeded
@@ -124,7 +187,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             return [
                 TextContent(
                     type="text",
-                    text=f"Error running analysis:\n{error_message}\n\nOutput:\n{result.stdout}"
+                    text=f"Error running hybrid analysis:\n{error_message}\n\nOutput:\n{result.stdout}"
                 )
             ]
         
@@ -136,14 +199,14 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             # Extract key metrics from the output
             stdout = result.stdout
             
-            # Parse out the key sections for a cleaner response
+            # Parse out key sections for cleaner response
             lines = stdout.split('\n')
             key_sections = []
             capture = False
             current_section = []
             
             for line in lines:
-                if 'MODEL PERFORMANCE' in line.upper() or 'BUILDING MODEL FOR' in line:
+                if any(keyword in line.upper() for keyword in ['HYBRID MODEL', 'BUILDING', 'MODEL TRAINING COMPLETE', 'FINAL MODEL SUMMARY']):
                     capture = True
                     if current_section:
                         key_sections.append('\n'.join(current_section))
@@ -159,8 +222,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
                         current_section = []
             
             # Create a formatted summary
-            summary = "✅ **Telecom Sales Prediction Analysis Complete**\n\n"
-            summary += "The linear regression models have been trained and evaluated.\n\n"
+            summary = "✅ **Hybrid Model Analysis Complete**\n\n"
+            summary += "The hybrid model (Random Forest for VAS_Sold + Linear Regression for Speed_Upgrades) "
+            summary += "has been trained and evaluated on test data (Aug-Oct 2025).\n\n"
             summary += "**Key Results:**\n"
             summary += '\n'.join(key_sections) if key_sections else stdout
             
@@ -174,25 +238,40 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             response_content.append(
                 TextContent(
                     type="text",
-                    text="✅ Analysis completed successfully! Visualization generated."
+                    text="✅ Hybrid model analysis completed successfully! Visualization generated."
                 )
             )
         
-        # Read the generated PNG file
-        if not PNG_OUTPUT.exists():
-            return [
+        # Find the most recent PNG file for hybrid analysis
+        png_file = find_latest_output_file("model_predictions_hybrid_final_*.png")
+        
+        if not png_file or not png_file.exists():
+            response_content.append(
                 TextContent(
                     type="text",
-                    text=f"Error: PNG file was not generated at expected location: {PNG_OUTPUT}"
+                    text=f"\n⚠️ Warning: PNG file was not found in {OUTPUT_DIR}\n"
+                         f"Looking for pattern: model_predictions_hybrid_final_*.png"
                 )
-            ]
+            )
+            return response_content
         
         # Read PNG as binary and encode to base64
-        with open(PNG_OUTPUT, 'rb') as img_file:
+        with open(png_file, 'rb') as img_file:
             image_data = img_file.read()
             base64_image = base64.b64encode(image_data).decode('utf-8')
         
-        # Add the image to response
+        # Add file info and image to response
+        file_size_kb = len(image_data) / 1024
+        response_content.append(
+            TextContent(
+                type="text",
+                text=f"\n📊 **Visualization Details:**\n"
+                     f"- File: {png_file.name}\n"
+                     f"- Size: {file_size_kb:.1f} KB\n"
+                     f"- Location: {png_file.relative_to(PROJECT_DIR)}"
+            )
+        )
+        
         response_content.append(
             ImageContent(
                 type="image",
@@ -207,7 +286,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
         return [
             TextContent(
                 type="text",
-                text="Error: Analysis process timed out (exceeded 60 seconds)\n"
+                text="Error: Analysis process timed out (exceeded 90 seconds)\n"
                      "This may indicate a problem with the data or computation."
             )
         ]
@@ -216,9 +295,200 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent | ImageConten
             TextContent(
                 type="text",
                 text=f"Error: Unexpected error occurred: {str(e)}\n"
-                     f"Script location: {ANALYZE_SCRIPT}\n"
+                     f"Script location: {HYBRID_ANALYZE_SCRIPT}\n"
                      f"CSV location: {CSV_FILE}\n"
-                     f"PNG output: {PNG_OUTPUT}"
+                     f"Output directory: {OUTPUT_DIR}"
+            )
+        ]
+
+
+async def run_december_prediction(arguments: Any) -> list[TextContent | ImageContent]:
+    """
+    Run the December 2025 prediction (predict_december_2025.py).
+    """
+    # Validate that required files exist
+    if not DECEMBER_PREDICT_SCRIPT.exists():
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Prediction script not found at {DECEMBER_PREDICT_SCRIPT}\n"
+                     f"Please ensure telecom-sales-predictor/predict_december_2025.py exists."
+            )
+        ]
+    
+    if not CSV_FILE.exists():
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Training data file not found at {CSV_FILE}\n"
+                     f"Please ensure telecom-sales-predictor/final_dataset.csv exists."
+            )
+        ]
+    
+    if not TEST_DATASET.exists():
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Test dataset not found at {TEST_DATASET}\n"
+                     f"Please run create_test_dataset_updated.py first to generate December 2025 test data."
+            )
+        ]
+    
+    include_stats = arguments.get("include_stats", True) if arguments else True
+    return_csv = arguments.get("return_csv", False) if arguments else False
+    
+    try:
+        # Run the prediction script
+        result = subprocess.run(
+            [sys.executable, str(DECEMBER_PREDICT_SCRIPT)],
+            capture_output=True,
+            text=True,
+            timeout=90,  # Timeout for training + prediction
+            check=False,
+            cwd=str(DECEMBER_PREDICT_SCRIPT.parent)  # Run in telecom-sales-predictor directory
+        )
+        
+        # Check if the process succeeded
+        if result.returncode != 0:
+            error_message = result.stderr.strip() if result.stderr else "Unknown error"
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error running December prediction:\n{error_message}\n\nOutput:\n{result.stdout}"
+                )
+            ]
+        
+        # Prepare response list
+        response_content = []
+        
+        # Add text output if requested
+        if include_stats:
+            # Extract key metrics from the output
+            stdout = result.stdout
+            
+            # Parse out summary sections
+            lines = stdout.split('\n')
+            key_sections = []
+            capture = False
+            current_section = []
+            
+            for line in lines:
+                if any(keyword in line.upper() for keyword in ['DECEMBER 2025', 'PREDICTIONS SUMMARY', 'TOP 5 DAYS']):
+                    capture = True
+                    if current_section and not all(line.strip() == '' for line in current_section):
+                        key_sections.append('\n'.join(current_section))
+                        current_section = []
+                
+                if capture:
+                    current_section.append(line)
+                
+                if 'PREDICTION COMPLETE' in line:
+                    capture = False
+                    if current_section:
+                        key_sections.append('\n'.join(current_section))
+                        current_section = []
+            
+            # Create a formatted summary
+            summary = "✅ **December 2025 Predictions Complete**\n\n"
+            summary += "Sales forecasts have been generated for December 2025 based on:\n"
+            summary += "- Historical data (Sep 2024 - Oct 2025)\n"
+            summary += "- Planned marketing campaigns (Push notifications & Emails)\n"
+            summary += "- Hybrid model (Random Forest + Linear Regression)\n\n"
+            summary += "**Prediction Summary:**\n"
+            summary += '\n'.join(key_sections) if key_sections else stdout
+            
+            response_content.append(
+                TextContent(
+                    type="text",
+                    text=summary
+                )
+            )
+        else:
+            response_content.append(
+                TextContent(
+                    type="text",
+                    text="✅ December 2025 predictions completed successfully!"
+                )
+            )
+        
+        # Find the most recent CSV and PNG files for December prediction
+        csv_file = find_latest_output_file("december_2025_predictions_*.csv")
+        png_file = find_latest_output_file("december_2025_predictions_chart_*.png")
+        
+        # Handle CSV file if requested
+        if return_csv and csv_file and csv_file.exists():
+            with open(csv_file, 'r') as f:
+                csv_content = f.read()
+            response_content.append(
+                TextContent(
+                    type="text",
+                    text=f"\n📄 **Detailed Predictions CSV:**\n```csv\n{csv_content}\n```"
+                )
+            )
+        
+        # Handle PNG visualization
+        if not png_file or not png_file.exists():
+            response_content.append(
+                TextContent(
+                    type="text",
+                    text=f"\n⚠️ Warning: Chart PNG was not found in {OUTPUT_DIR}\n"
+                         f"Looking for pattern: december_2025_predictions_chart_*.png"
+                )
+            )
+            return response_content
+        
+        # Read PNG as binary and encode to base64
+        with open(png_file, 'rb') as img_file:
+            image_data = img_file.read()
+            base64_image = base64.b64encode(image_data).decode('utf-8')
+        
+        # Add file info
+        file_size_kb = len(image_data) / 1024
+        file_info = f"\n📊 **Visualization Details:**\n"
+        file_info += f"- Chart: {png_file.name}\n"
+        file_info += f"- Chart Size: {file_size_kb:.1f} KB\n"
+        
+        if csv_file and csv_file.exists():
+            csv_size_kb = csv_file.stat().st_size / 1024
+            file_info += f"- CSV: {csv_file.name}\n"
+            file_info += f"- CSV Size: {csv_size_kb:.1f} KB\n"
+        
+        file_info += f"- Location: {OUTPUT_DIR.relative_to(PROJECT_DIR)}"
+        
+        response_content.append(
+            TextContent(
+                type="text",
+                text=file_info
+            )
+        )
+        
+        response_content.append(
+            ImageContent(
+                type="image",
+                data=base64_image,
+                mimeType="image/png"
+            )
+        )
+        
+        return response_content
+            
+    except subprocess.TimeoutExpired:
+        return [
+            TextContent(
+                type="text",
+                text="Error: Prediction process timed out (exceeded 90 seconds)\n"
+                     "This may indicate a problem with the data or computation."
+            )
+        ]
+    except Exception as e:
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Unexpected error occurred: {str(e)}\n"
+                     f"Script location: {DECEMBER_PREDICT_SCRIPT}\n"
+                     f"Training data: {CSV_FILE}\n"
+                     f"Test data: {TEST_DATASET}\n"
+                     f"Output directory: {OUTPUT_DIR}"
             )
         ]
 
@@ -235,4 +505,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
