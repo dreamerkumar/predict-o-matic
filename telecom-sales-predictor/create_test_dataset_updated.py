@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import os
 
 # Read the updated marketing events Excel file
 marketing_df = pd.read_excel('updated Dec Marketing events.xlsx')
@@ -92,7 +93,9 @@ print(f"    - Total Emails: {total_web_email:,}")
 print()
 
 # Save to CSV
-output_file = 'test_dataset_dec_2025.csv'
+os.makedirs('output_files', exist_ok=True)
+timestamp = datetime.utcnow().isoformat(timespec='milliseconds').replace(':', '-').replace('.', '-') + 'Z'
+output_file = f'output_files/test_dataset_dec_2025_{timestamp}.csv'
 test_df.to_csv(output_file, index=False)
 print(f"[OK] Test dataset saved to: {output_file}")
 print(f"\nColumns: {list(test_df.columns)}")

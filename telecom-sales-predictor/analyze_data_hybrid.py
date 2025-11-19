@@ -6,6 +6,8 @@ from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import os
+from datetime import datetime
 
 def get_holiday_features(date):
     """
@@ -392,7 +394,9 @@ def main():
     plt.tight_layout()
 
     # Save the figure
-    output_file = 'model_predictions_hybrid_final.png'
+    os.makedirs('output_files', exist_ok=True)
+    timestamp = datetime.utcnow().isoformat(timespec='milliseconds').replace(':', '-').replace('.', '-') + 'Z'
+    output_file = f'output_files/model_predictions_hybrid_final_{timestamp}.png'
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"\n[OK] Visualization saved to: {output_file}")
 

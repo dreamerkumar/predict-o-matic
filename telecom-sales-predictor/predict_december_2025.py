@@ -5,6 +5,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import os
+from datetime import datetime
 
 def get_holiday_features(date):
     """
@@ -187,7 +189,9 @@ for idx, row in top_upgrades.iterrows():
     print(f"  {row['Date'].strftime('%m/%d/%Y')}: {row['Speed_Upgrades_Predicted']:,} Upgrades (Emails: {row['Emails_Sent']:,})")
 
 # Save predictions to CSV
-output_file = 'december_2025_predictions.csv'
+os.makedirs('output_files', exist_ok=True)
+timestamp = datetime.utcnow().isoformat(timespec='milliseconds').replace(':', '-').replace('.', '-') + 'Z'
+output_file = f'output_files/december_2025_predictions_{timestamp}.csv'
 df_test_output = df_test[['Date', 'Channel', 'VAS_Sold_Predicted', 'Speed_Upgrades_Predicted',
                           'Emails_Sent', 'Push_Notifications_Sent']].copy()
 df_test_output['Date'] = df_test_output['Date'].dt.strftime('%m/%d/%Y')
@@ -296,7 +300,7 @@ ax2.annotate(f'Final: {int(final_row["Speed_Upgrades_Cumulative"]):,}',
 plt.tight_layout()
 
 # Save the figure
-output_chart = 'december_2025_predictions_chart.png'
+output_chart = f'output_files/december_2025_predictions_chart_{timestamp}.png'
 plt.savefig(output_chart, dpi=300, bbox_inches='tight')
 print(f"[OK] Chart saved to: {output_chart}")
 

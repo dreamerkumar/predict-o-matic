@@ -52,3 +52,5 @@ Thumbs.db
 # Ignore instructions file
 telecom-sales-predictor/instructions.md
 instructions.md
+
+output_files/
