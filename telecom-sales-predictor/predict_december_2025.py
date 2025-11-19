@@ -301,7 +301,7 @@ plt.tight_layout()
 
 # Save the figure
 output_chart = f'output_files/december_2025_predictions_chart_{timestamp}.png'
-plt.savefig(output_chart, dpi=300, bbox_inches='tight')
+plt.savefig(output_chart, dpi=100, bbox_inches='tight')
 print(f"[OK] Chart saved to: {output_chart}")
 
 plt.close()

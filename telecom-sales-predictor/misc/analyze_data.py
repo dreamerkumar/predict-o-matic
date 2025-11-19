@@ -299,7 +299,7 @@ def main():
     os.makedirs('../output_files', exist_ok=True)
     timestamp = datetime.utcnow().isoformat(timespec='milliseconds').replace(':', '-').replace('.', '-') + 'Z'
     output_file = f'../output_files/model_predictions_test_set_{timestamp}.png'
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    plt.savefig(output_file, dpi=100, bbox_inches='tight')
     print(f"\nVisualization saved to: {output_file}")
 
     # Close the plot to free memory
